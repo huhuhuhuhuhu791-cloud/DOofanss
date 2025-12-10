@@ -1,0 +1,12 @@
+# Dependencies
+node_modules
+*/node_modules
+
+# Environment variables (QUAN TRỌNG: Dòng này chặn file chứa key)
+.env
+*/.env
+backend/.env
+
+# Build outputs
+dist
+build
