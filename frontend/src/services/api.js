@@ -10,7 +10,7 @@ const api = axios.create({
   }
 });
 
-// Request interceptor (có thể thêm token nếu cần auth)
+// Request interceptor (gắn token nếu có)
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
@@ -22,7 +22,7 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-// Response interceptor
+// Response interceptor (xử lý lỗi chung)
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
@@ -52,30 +52,30 @@ export const translateAPI = {
   getSupportedLanguages: () => api.get('/translate/languages')
 };
 
-// ========== AI API - TÍCH HỢP AI ==========
+// ========== AI API (ĐÃ CẬP NHẬT CHO BACKEND MỚI) ==========
 export const aiAPI = {
-  // Tóm tắt bài báo bằng AI
-  summarizeText: (text, options = {}) => 
-    api.post('/ai/summarize', { 
-      text, 
-      maxLength: options.maxLength || 150,
-      minLength: options.minLength || 50
-    }),
+  // 1. Tóm tắt bài báo (Gemini)
+  summarize: (content) => 
+    api.post('/ai/summarize', { content }),
 
-  // Trích xuất từ khóa quan trọng
-  extractKeywords: (text, topK = 10) => 
-    api.post('/ai/extract-keywords', { text, topK }),
+  // 2. Tạo Quiz trắc nghiệm (Gemini JSON Mode)
+  generateQuiz: (content) => 
+    api.post('/ai/quiz', { content }),
 
-  // Tạo câu hỏi quiz từ bài báo
-  generateQuiz: (text, numQuestions = 5) => 
-    api.post('/ai/generate-quiz', { text, numQuestions }),
+  // 3. Giải thích từ vựng/ngữ pháp (Gemini)
+  explain: (text, context) => 
+    api.post('/ai/explain', { text, context }),
 
-  // Phân tích độ khó của bài báo
-  analyzeDifficulty: (text) => 
-    api.post('/ai/difficulty-level', { text })
+  // 4. Phân tích cảm xúc (Gemini)
+  analyzeSentiment: (text) => 
+    api.post('/ai/analyze-sentiment', { text }),
+
+  // 5. Đọc bài báo (Hugging Face TTS)
+  textToSpeech: (text) => 
+    api.post('/ai/text-to-speech', { text })
 };
 
-// ========== VOCABULARY API (nếu có backend cho vocabulary) ==========
+// ========== VOCABULARY API ==========
 export const vocabularyAPI = {
   getUserVocabulary: () => api.get('/vocabulary'),
   addVocabulary: (word, meaning, context) => 

@@ -1,59 +1,62 @@
 import express from 'express';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import axios from 'axios';
 import dotenv from 'dotenv';
 
 dotenv.config();
 
 const router = express.Router();
-
-// Khởi tạo Gemini
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+const MW_API_KEY = process.env.MW_API_KEY;
+const MW_URL = 'https://www.dictionaryapi.com/api/v3/references/learners/json';
 
 router.get('/:word', async (req, res) => {
   try {
     const { word } = req.params;
 
-    // Cấu hình Model
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+    if (!MW_API_KEY) {
+      return res.status(500).json({ message: 'Chưa cấu hình Merriam-Webster API Key' });
+    }
+    const response = await axios.get(`${MW_URL}/${word}?key=${MW_API_KEY}`);
+    const data = response.data;
+    if (!data || data.length === 0 || typeof data[0] === 'string') {
+      return res.status(404).json({ message: 'Không tìm thấy từ này trong từ điển.' });
+    }
 
-    // Prompt: Yêu cầu Gemini đóng vai từ điển và trả về JSON chuẩn
-    const prompt = `
-      Define the English word "${word}" for an English learner.
-      Return ONLY a valid JSON object. Do not use Markdown code blocks.
-      The JSON structure must be exactly like this:
-      {
-        "word": "${word}",
-        "phonetic": "/IPA transcription/",
-        "meanings": [
-          {
-            "partOfSpeech": "noun/verb/adj...",
-            "definitions": [
-              {
-                "definition": "Simple definition in English",
-                "example": "A simple example sentence using the word"
-              }
-            ]
-          }
-        ]
-      }
-      Provide at most 2 distinct meanings (e.g. one noun, one verb) and 1 definition per meaning.
-    `;
+    // Lấy kết quả đầu tiên chuẩn nhất
+    const entry = data[0];
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    let text = response.text();
+    // --- XỬ LÝ DỮ LIỆU CỦA MERRIAM-WEBSTER ---
+    // 1. Từ vựng (Xóa các ký tự thừa như dấu *)
+    const cleanWord = entry.hwi.hw.replace(/\*/g, '');
 
-    // Làm sạch chuỗi JSON (đề phòng Gemini thêm ```json vào)
-    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+    // 2. Phiên âm (IPA)
+    const phonetic = entry.hwi.prs ? `/${entry.hwi.prs[0].ipa}/` : '';
 
-    const dictionaryData = JSON.parse(text);
+    // 3. Audio (MW có file audio nhưng đường dẫn rất phức tạp, ta dùng tạm null để Frontend dùng AI đọc)
+    // Nếu muốn dùng audio thật của MW thì cần logic phức tạp hơn để ghép link.
+    
+    // 4. Định nghĩa (Dùng trường 'shortdef' cho gọn và dễ hiểu)
+    const definitions = entry.shortdef || [];
+    
+    // Tạo cấu trúc dữ liệu chuẩn cho Frontend
+    const result = {
+      word: cleanWord,
+      phonetic: phonetic,
+      meanings: [
+        {
+          partOfSpeech: entry.fl || 'unknown', // Loại từ (noun, verb...)
+          definitions: definitions.slice(0, 3).map(def => ({
+            definition: def,
+            example: null // 'shortdef' của MW không kèm ví dụ, nhưng định nghĩa rất chuẩn
+          }))
+        }
+      ]
+    };
 
-    // Trả về cho Frontend
-    res.json(dictionaryData);
+    res.json(result);
 
   } catch (error) {
-    console.error('Lỗi Gemini Dictionary:', error);
-    res.status(500).json({ message: 'Lỗi khi tra từ với AI' });
+    console.error('Lỗi Merriam-Webster:', error.message);
+    res.status(500).json({ message: 'Lỗi server từ điển' });
   }
 });
 
