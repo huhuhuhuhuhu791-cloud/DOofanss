@@ -3,7 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
 
-// --- 1. IMPORT ROUTES (Chỉ import mỗi thứ 1 lần) ---
+// --- 1. IMPORT ROUTES ---
 import newsRoutes from './routes/news.js';
 import dictionaryRoutes from './routes/dictionary.js';
 import flashcardRoutes from './routes/flashcards.js';
@@ -19,10 +19,17 @@ dotenv.config();
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// --- 2. MIDDLEWARE (Bắt buộc phải đặt TRƯỚC các route) ---
+// --- 2. MIDDLEWARE (PHẢI ĐẶT TRƯỚC ROUTES) ---
 app.use(cors()); // Cho phép Frontend gọi vào
-app.use(express.json()); // Cho phép đọc dữ liệu JSON gửi lên
-app.use(express.urlencoded({ extended: true }));
+
+// ⭐ FIX PAYLOAD TOO LARGE ⭐
+// Tăng giới hạn request body từ 100KB lên 50MB
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Fallback cho các trường hợp khác
+app.use(express.text({ limit: '50mb' }));
+app.use(express.raw({ limit: '50mb' }));
 
 // --- 3. KẾT NỐI DATABASE ---
 mongoose.connect(process.env.MONGODB_URI)
@@ -35,6 +42,10 @@ app.get('/', (req, res) => {
   res.json({ 
     message: 'SmartNews English API is running',
     version: '1.0.0',
+    limits: {
+      maxPayload: '50MB',
+      note: 'Tăng từ 100KB để xử lý bài báo lớn'
+    },
     endpoints: {
       news: '/api/news',
       dictionary: '/api/dictionary',
@@ -52,16 +63,36 @@ app.use('/api/flashcards', flashcardRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/translate', translateRoutes);
 
-// --- 5. XỬ LÝ LỖI (Phải đặt SAU cùng) ---
+// --- 5. HANDLE PAYLOAD TOO LARGE ERROR ---
+app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({
+      success: false,
+      message: 'Request payload too large',
+      error: 'Bài báo quá dài. Giới hạn 50MB.',
+      received: `${(err.length / 1024 / 1024).toFixed(2)}MB`,
+      limit: '50MB'
+    });
+  }
+  next(err);
+});
+
+// --- 6. XỬ LÝ LỖI CHUNG ---
 app.use(errorHandler);
 
 // Xử lý lỗi 404 (Không tìm thấy đường dẫn)
 app.use((req, res) => {
-  res.status(404).json({ message: 'Route not found' });
+  res.status(404).json({ 
+    success: false,
+    message: 'Route not found',
+    path: req.path,
+    method: req.method
+  });
 });
 
-// --- 6. KHỞI ĐỘNG SERVER ---
+// --- 7. KHỞI ĐỘNG SERVER ---
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
   console.log(`📚 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📦 Max Payload: 50MB (nâng từ 100KB)`);
 });

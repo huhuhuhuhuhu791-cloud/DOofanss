@@ -3,13 +3,6 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import dotenv from 'dotenv';
 import axios from 'axios';
 
-// --- SỬA LỖI IMPORT Ở ĐÂY ---
-// Dùng createRequire để tải thư viện google-tts-api theo chuẩn CommonJS cũ
-// Cách này đảm bảo 100% không bị lỗi "is not a function"
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const googleTTS = require('google-tts-api');
-
 dotenv.config();
 
 const router = express.Router();
@@ -21,7 +14,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const getGeminiModel = (jsonMode = false) => {
   const config = jsonMode ? { responseMimeType: "application/json" } : {};
   return genAI.getGenerativeModel({ 
-    model: "gemini-1.5-flash", 
+    model: "gemini-2.5-flash", 
     generationConfig: config 
   });
 };
@@ -139,32 +132,50 @@ router.post('/analyze-sentiment', async (req, res) => {
 });
 
 // ==========================================
-// 5. API TEXT TO SPEECH (GOOGLE TTS - FIX LỖI IMPORT)
+// 5. API TEXT TO SPEECH (HUGGING FACE - CHUẨN)
 // ==========================================
 router.post('/text-to-speech', async (req, res) => {
   try {
     const { text } = req.body;
     if (!text) return res.status(400).json({ message: 'Text is required' });
 
-    // Google TTS giới hạn độ dài, cắt ngắn cho an toàn
-    const safeText = text.substring(0, 1000); 
+    // Giới hạn độ dài
+    const safeText = text.substring(0, 300);
 
-    // Gọi hàm từ object googleTTS đã require ở trên
-    const url = googleTTS.getAudioUrl(safeText, {
-      lang: 'en',
-      slow: false,
-      host: 'https://translate.google.com',
-    });
+    console.log('🔊 Đang gọi Hugging Face TTS...');
+
+    // Gọi Hugging Face TTS API (miễn phí, không cần key)
+    const response = await axios.post(
+      'https://api-inference.huggingface.co/models/espnet/kan-bayashi_ljspeech_fastspeech2_raw',
+      { inputs: safeText },
+      {
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        timeout: 30000,
+        responseType: 'arraybuffer'
+      }
+    );
+
+    // Chuyển thành Base64
+    const audioBuffer = Buffer.from(response.data);
+    const audioBase64 = audioBuffer.toString('base64');
 
     res.json({
       success: true,
-      audioUrl: url, 
-      type: 'url'
+      audioBase64: audioBase64,
+      format: 'wav'
     });
 
   } catch (error) {
-    console.error('TTS error:', error);
-    res.status(500).json({ message: 'Lỗi tạo giọng nói' });
+    console.error('TTS error:', error.message);
+
+    // Fallback: dùng Web Speech API (phía client)
+    res.json({
+      success: true,
+      useWebSpeech: true,
+      message: 'Using browser speech synthesis as fallback'
+    });
   }
 });
 

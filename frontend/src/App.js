@@ -3,41 +3,30 @@ import Navbar from './components/Navbar';
 import DictionaryPopup from './components/DictionaryPopup';
 import FlashcardList from './components/FlashcardList';
 import QuizModal from './components/QuizModal';
-// Import các API từ file service đã tạo
 import { newsAPI, aiAPI, dictionaryAPI } from './services/api';
 
 function App() {
-  // --- STATE QUẢN LÝ MÀN HÌNH ---
-  const [currentView, setCurrentView] = useState('home'); // 'home' hoặc 'flashcards'
-
-  // --- STATE DỮ LIỆU ---
+  const [currentView, setCurrentView] = useState('home');
   const [news, setNews] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [dictData, setDictData] = useState(null);
   const [popupPos, setPopupPos] = useState({ x: 0, y: 0 });
-
-  // --- STATE CHO AI (GEMINI + HUGGING FACE) ---
   const [summary, setSummary] = useState(null);
   const [isSummarizing, setIsSummarizing] = useState(false);
-  
   const [quizData, setQuizData] = useState(null);
   const [isCreatingQuiz, setIsCreatingQuiz] = useState(false);
-  
-  const [isSpeaking, setIsSpeaking] = useState(false); // State cho nút Nghe
-  const [sentiment, setSentiment] = useState(null);    // State cho Phân tích cảm xúc
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [sentiment, setSentiment] = useState(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  // Hàm tiện ích: Lọc bỏ thẻ HTML để lấy text thuần cho AI
   const getRawText = (htmlContent) => {
     const div = document.createElement("div");
     div.innerHTML = htmlContent;
     return div.textContent || div.innerText || "";
   };
 
-  // --- HÀM 1: GỌI AI TÓM TẮT ---
   const handleSummarize = async () => {
     if (!selectedArticle) return;
     setIsSummarizing(true);
@@ -46,14 +35,12 @@ function App() {
       const res = await aiAPI.summarize(textContent);
       setSummary(res.summary);
     } catch (err) {
-      console.error(err);
-      alert("Lỗi khi tóm tắt");
+      alert("❌ Lỗi tóm tắt. Vui lòng thử lại!");
     } finally {
       setIsSummarizing(false);
     }
   };
 
-  // --- HÀM 2: GỌI AI TẠO QUIZ ---
   const handleCreateQuiz = async () => {
     if (!selectedArticle) return;
     setIsCreatingQuiz(true);
@@ -62,60 +49,56 @@ function App() {
       const res = await aiAPI.generateQuiz(textContent);
       setQuizData(res.quiz);
     } catch (err) {
-      console.error(err);
-      alert("Lỗi khi tạo câu hỏi");
+      alert("❌ Lỗi tạo quiz. Vui lòng thử lại!");
     } finally {
       setIsCreatingQuiz(false);
     }
   };
 
-
-// --- HÀM 3: GỌI AI ĐỌC BÀI (Dùng Hugging Face) ---
-// --- HÀM 3: GỌI AI ĐỌC BÀI (Phiên bản Google siêu tốc) ---
   const handleTextToSpeech = async () => {
-    // 1. Logic bật/tắt: Nếu đang nói thì tắt đi
     if (isSpeaking) {
-        if (window.currentAudio) {
-            window.currentAudio.pause();
-            window.currentAudio = null;
-        }
-        setIsSpeaking(false);
-        return;
+      if (window.currentAudio) {
+        window.currentAudio.pause();
+        window.currentAudio = null;
+      }
+      if (window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel();
+      }
+      setIsSpeaking(false);
+      return;
     }
 
     if (!selectedArticle) return;
     setIsSpeaking(true);
 
     try {
-      // Google đọc được dài hơn Hugging Face, lấy 1000 ký tự ok
-      const textContent = getRawText(selectedArticle.content).substring(0, 1000);
-      
-      console.log("Đang gọi Google TTS...");
+      const textContent = getRawText(selectedArticle.content).substring(0, 300);
       const res = await aiAPI.textToSpeech(textContent);
       
-      if (res.success && res.audioUrl) {
-        const audio = new Audio(res.audioUrl);
-        window.currentAudio = audio; // Lưu vào biến toàn cục để có thể pause được
-        
-        audio.play();
-        
-        audio.onended = () => {
-            setIsSpeaking(false);
-            window.currentAudio = null;
-        };
-
-        audio.onerror = () => {
-            alert("Không tải được file âm thanh.");
-            setIsSpeaking(false);
-        };
+      if (res.useWebSpeech) {
+        const utterance = new SpeechSynthesisUtterance(textContent);
+        utterance.lang = 'en-US';
+        utterance.rate = 0.9;
+        utterance.onend = () => setIsSpeaking(false);
+        window.speechSynthesis.speak(utterance);
+      } else if (res.success && res.audioBase64) {
+        const audioData = `data:audio/wav;base64,${res.audioBase64}`;
+        const audio = new Audio(audioData);
+        window.currentAudio = audio;
+        audio.play().catch(() => {
+          const utterance = new SpeechSynthesisUtterance(textContent);
+          utterance.lang = 'en-US';
+          window.speechSynthesis.speak(utterance);
+          utterance.onend = () => setIsSpeaking(false);
+        });
+        audio.onended = () => setIsSpeaking(false);
       }
     } catch (err) {
-      console.error(err);
-      alert("Lỗi kết nối server TTS.");
+      alert("❌ Lỗi phát âm. Vui lòng thử lại!");
       setIsSpeaking(false);
     }
   };
-  // --- HÀM 4: GỌI AI PHÂN TÍCH CẢM XÚC ---
+
   const handleSentiment = async () => {
     if (!selectedArticle) return;
     setIsAnalyzing(true);
@@ -124,60 +107,39 @@ function App() {
       const res = await aiAPI.analyzeSentiment(textContent);
       setSentiment(res);
     } catch (err) {
-      console.error(err);
-      alert("Lỗi phân tích cảm xúc");
+      alert("❌ Lỗi phân tích. Vui lòng thử lại!");
     } finally {
       setIsAnalyzing(false);
     }
   };
 
-  // --- HÀM 5: TRA TỪ ĐIỂN (Khi bôi đen) ---
-// --- HÀM 5: TRA TỪ ĐIỂN (ĐÃ SỬA LỖI) ---
   const handleTextSelection = async () => {
     const selection = window.getSelection();
-    const rawText = selection.toString(); // Không trim vội để check length chuẩn hơn
-
-    // 1. Kiểm tra cơ bản
+    const rawText = selection.toString();
     if (!rawText || rawText.trim().length < 2) return;
 
-    // 2. Làm sạch từ: CHỈ trim khoảng trắng thừa đầu đuôi, giữ nguyên cụm từ
-    // Thay vì xóa hết ký tự lạ, ta chỉ xóa dấu câu ở cuối câu (ví dụ "apple." -> "apple")
     const cleanText = rawText.trim().replace(/[.,!?;:()"]/g, "");
-
-    console.log("Đang tra từ:", cleanText); // Check log xem đúng từ không
-
-    // 3. Tính toán vị trí popup (Dùng Fixed Position để không bị lệch)
     const range = selection.getRangeAt(0);
     const rect = range.getBoundingClientRect();
-    
-    // Lưu ý: Không cộng window.scrollY nữa nếu dùng position: fixed
-    setPopupPos({ 
-      x: rect.left + (rect.width / 2), 
-      y: rect.bottom + 10 
-    });
+    setPopupPos({ x: rect.left + (rect.width / 2), y: rect.bottom + 10 });
 
     try {
       const res = await dictionaryAPI.lookupWord(cleanText);
-
       if (res && (Array.isArray(res) || res.word)) {
-         const data = Array.isArray(res) ? res[0] : res;
-         setDictData(data); 
+        const data = Array.isArray(res) ? res[0] : res;
+        setDictData(data);
       } else {
-         console.warn("Không tìm thấy từ");
-         setDictData(null);
+        setDictData(null);
       }
     } catch (err) {
-      console.error("Lỗi tra từ:", err);
-      setDictData(null); 
+      setDictData(null);
     }
   };
 
-  // --- HÀM 6: LẤY TIN TỨC ---
   useEffect(() => {
     const fetchNews = async () => {
       try {
         setLoading(true);
-        // Dùng newsAPI từ file service
         const data = await newsAPI.getTopHeadlines();
         if (data.success) setNews(data.articles);
         else setError(data.message);
@@ -190,7 +152,6 @@ function App() {
     fetchNews();
   }, []);
 
-  // --- RESET STATE KHI ĐỔI BÀI ---
   const resetArticleState = () => {
     setSelectedArticle(null);
     setDictData(null);
@@ -200,102 +161,124 @@ function App() {
     setIsSpeaking(false);
   };
 
-  // --- RENDER CHI TIẾT BÀI BÁO ---
   const renderArticleDetail = () => {
     if (!selectedArticle) return null;
 
     return (
-      <div className="container mx-auto p-6 max-w-4xl relative">
+      <div className="container-fluid container-max py-8">
+        {/* BACK BUTTON */}
         <button
           onClick={resetArticleState}
-          className="mb-6 flex items-center text-blue-600 hover:text-blue-800 font-bold text-lg sticky top-20 bg-gray-50/90 backdrop-blur-sm p-2 rounded z-40 shadow-sm"
+          className="btn btn-primary btn-sm mb-8 animate-slide-in-left"
         >
-          &larr; Quay lại danh sách
+          <span>←</span> Quay lại
         </button>
 
-        <article className="bg-white rounded-xl shadow-2xl overflow-hidden p-6 md:p-12 relative">
-          <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 mb-6 leading-tight">
-            {selectedArticle.title}
-          </h1>
+        {/* MAIN ARTICLE */}
+        <article className="card-elevated p-8 md:p-12 animate-fade-in-up">
+          {/* HEADER */}
+          <div className="mb-8">
+            <h1 className="text-gradient mb-4">{selectedArticle.title}</h1>
+            
+            {/* META */}
+            <div className="flex flex-wrap items-center gap-3 pb-6 border-b-2 border-slate-300">
+              <span className="badge badge-blue">
+                {selectedArticle.source || 'News'}
+              </span>
+              <span className="text-sm text-slate-600">
+                📅 {new Date(selectedArticle.publishedAt).toLocaleDateString('vi-VN')}
+              </span>
+              {selectedArticle.author && (
+                <span className="text-sm text-slate-600">✍️ {selectedArticle.author}</span>
+              )}
+            </div>
+          </div>
 
-          {/* TOOLBAR CÁC CHỨC NĂNG AI */}
-          <div className="flex flex-wrap gap-3 mb-8 border-b pb-6">
+          {/* AI TOOLBAR */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
             <button
               onClick={handleSummarize}
               disabled={isSummarizing}
-              className="flex items-center gap-2 bg-purple-100 text-purple-700 px-4 py-2 rounded-full font-bold hover:bg-purple-200 transition disabled:opacity-50"
+              className="btn bg-gradient-secondary text-white hover:shadow-xl hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isSummarizing ? "⏳ Đang viết..." : "✨ AI Tóm tắt"}
+              {isSummarizing ? "⏳" : "✨"} <span className="hidden sm:inline">Tóm tắt</span>
             </button>
 
             <button
               onClick={handleSentiment}
               disabled={isAnalyzing}
-              className="flex items-center gap-2 bg-blue-100 text-blue-700 px-4 py-2 rounded-full font-bold hover:bg-blue-200 transition disabled:opacity-50"
+              className="btn bg-gradient-primary text-white hover:shadow-xl hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isAnalyzing ? "⏳ Đang soi..." : "🔍 Cảm xúc"}
+              {isAnalyzing ? "⏳" : "🔍"} <span className="hidden sm:inline">Cảm xúc</span>
             </button>
 
             <button
               onClick={handleTextToSpeech}
-              disabled={isSpeaking}
-              className={`flex items-center gap-2 px-4 py-2 rounded-full font-bold transition disabled:opacity-50 ${
-                isSpeaking ? 'bg-green-500 text-white animate-pulse' : 'bg-green-100 text-green-700 hover:bg-green-200'
+              className={`btn text-white transition-all ${
+                isSpeaking 
+                  ? 'bg-gradient-success shadow-xl animate-pulse-glow' 
+                  : 'bg-gradient-success hover:shadow-xl hover:scale-105'
               }`}
             >
-              {isSpeaking ? "🔊 Đang đọc..." : "🔈 Nghe bài báo"}
+              {isSpeaking ? "🔊" : "🔈"} <span className="hidden sm:inline">Nghe</span>
             </button>
 
             <button
               onClick={handleCreateQuiz}
               disabled={isCreatingQuiz}
-              className="flex items-center gap-2 bg-orange-100 text-orange-700 px-4 py-2 rounded-full font-bold hover:bg-orange-200 transition disabled:opacity-50"
+              className="btn bg-gradient-warning text-white hover:shadow-xl hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {isCreatingQuiz ? "⏳ Đang tạo..." : "📝 Làm Quiz"}
+              {isCreatingQuiz ? "⏳" : "📝"} <span className="hidden sm:inline">Quiz</span>
             </button>
           </div>
 
-          {/* HIỂN THỊ KẾT QUẢ AI */}
-          <div className="space-y-4 mb-8">
+          {/* AI RESULTS */}
+          <div className="space-y-4 mb-10">
             {summary && (
-              <div className="bg-purple-50 border-l-4 border-purple-500 p-4 rounded-r animate-fade-in">
-                <h4 className="font-bold text-purple-800 mb-1">Tóm tắt bởi AI:</h4>
-                <p className="text-gray-700 italic">{summary}</p>
+              <div className="alert alert-info animate-slide-in-down">
+                <div className="alert-icon">✨</div>
+                <div className="alert-content">
+                  <div className="alert-title">Tóm tắt bởi AI</div>
+                  <p className="text-slate-800">{summary}</p>
+                </div>
               </div>
             )}
 
             {sentiment && (
-              <div className={`border-l-4 p-4 rounded-r animate-fade-in ${
-                sentiment.sentiment === 'Positive' ? 'bg-green-50 border-green-500' : 'bg-red-50 border-red-500'
-              }`}>
-                <h4 className="font-bold mb-1">
-                  {sentiment.emoji} Sắc thái: <span className={sentiment.sentiment === 'Positive' ? 'text-green-700' : 'text-red-700'}>{sentiment.sentiment}</span>
-                </h4>
-                <p className="text-gray-600 text-sm">Độ tin cậy: {sentiment.confidence}%</p>
-                <p className="text-gray-700 italic mt-1">"{sentiment.explanation}"</p>
+              <div className={`alert ${
+                sentiment.sentiment === 'Positive' ? 'alert-success' :
+                sentiment.sentiment === 'Negative' ? 'alert-danger' :
+                'alert-warning'
+              } animate-slide-in-down`}>
+                <div className="alert-icon">{sentiment.emoji}</div>
+                <div className="alert-content">
+                  <div className="alert-title">
+                    Sắc thái: <strong>{sentiment.sentiment}</strong>
+                  </div>
+                  <p className="text-sm">💯 Độ tin cậy: {sentiment.confidence}%</p>
+                  <p className="mt-2 italic">"{sentiment.explanation}"</p>
+                </div>
               </div>
             )}
           </div>
 
-          {/* ẢNH BÀI BÁO */}
-          <div className="w-full h-auto mb-10 rounded-lg overflow-hidden shadow-sm">
+          {/* FEATURED IMAGE */}
+          <div className="mb-10 rounded-2xl overflow-hidden shadow-xl h-96">
             <img
               src={selectedArticle.urlToImage}
               alt={selectedArticle.title}
-              className="w-full object-cover"
+              className="w-full h-full object-cover hover:scale-110 transition-transform duration-500"
               onError={(e) => { e.target.src = 'https://via.placeholder.com/800x400?text=News+Image' }}
             />
           </div>
 
-          {/* NỘI DUNG BÀI BÁO (Bôi đen để tra từ) */}
-          <div className="relative">
+          {/* CONTENT */}
+          <div className="prose prose-lg max-w-none bg-white p-8 rounded-2xl shadow-md border-2 border-slate-200">
             <div
-              className="prose prose-lg max-w-none text-gray-800 leading-9 font-serif"
               dangerouslySetInnerHTML={{ __html: selectedArticle.content }}
-              onMouseUp={handleTextSelection} // Sự kiện bôi đen
+              onMouseUp={handleTextSelection}
+              className="text-slate-800"
             />
-            
-            {/* POPUP TRA TỪ ĐIỂN */}
             {dictData && (
               <DictionaryPopup
                 data={dictData}
@@ -306,7 +289,6 @@ function App() {
           </div>
         </article>
 
-        {/* MODAL QUIZ */}
         {quizData && (
           <QuizModal quizData={quizData} onClose={() => setQuizData(null)} />
         )}
@@ -314,9 +296,8 @@ function App() {
     );
   };
 
-  // --- GIAO DIỆN CHÍNH ---
   return (
-    <div className="min-h-screen bg-gray-50 font-sans text-gray-900">
+    <div className="min-h-screen bg-gradient-cool">
       <Navbar onNavigate={(view) => {
         setCurrentView(view);
         resetArticleState();
@@ -329,50 +310,83 @@ function App() {
           {selectedArticle ? (
             renderArticleDetail()
           ) : (
-            <main className="container mx-auto p-6">
-              <div className="mb-8">
-                <h2 className="text-3xl font-bold text-gray-900 pl-3 border-l-8 border-blue-600">
-                  Tin tức mới nhất (SmartNews AI)
-                </h2>
-                <p className="text-gray-500 mt-2 pl-3">Đọc báo tiếng Anh, tra từ điển, luyện nghe và làm Quiz với AI.</p>
+            <main className="container-fluid container-max py-12">
+              {/* HEADER SECTION */}
+              <div className="mb-12 animate-fade-in-up">
+                <h1 className="text-gradient flex items-center gap-3 mb-3">
+                  <span>📰</span> Tin Tức Mới Nhất
+                </h1>
+                <p className="text-slate-600 text-lg">
+                  Đọc bài báo tiếng Anh, tra từ điển, luyện nghe và làm Quiz với AI
+                </p>
               </div>
 
-              {loading ? (
-                <div className="text-center py-20 text-gray-500">Đang tải tin tức...</div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {/* LOADING STATE */}
+              {loading && (
+                <div className="flex items-center justify-center py-24">
+                  <div className="text-center">
+                    <div className="spinner spinner-lg mb-4 mx-auto text-blue-600"></div>
+                    <p className="text-slate-600 text-lg font-medium">Đang tải tin tức...</p>
+                  </div>
+                </div>
+              )}
+
+              {/* ERROR STATE */}
+              {error && !loading && (
+                <div className="alert alert-danger mb-8 animate-slide-in-down">
+                  <div className="alert-icon">❌</div>
+                  <div className="alert-content">
+                    <div className="alert-title">Lỗi tải dữ liệu</div>
+                    <p>{error}</p>
+                  </div>
+                </div>
+              )}
+
+              {/* NEWS GRID */}
+              {!loading && news.length > 0 && (
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {news.map((item, index) => (
                     <div
                       key={index}
-                      className="bg-white rounded-xl shadow-md overflow-hidden hover:shadow-2xl transition-all duration-300 transform hover:-translate-y-1 cursor-pointer flex flex-col h-full group"
+                      className="card group cursor-pointer overflow-hidden animate-fade-in"
                       onClick={() => setSelectedArticle(item)}
+                      style={{ animationDelay: `${index * 50}ms` }}
                     >
-                      <div className="h-56 overflow-hidden relative">
+                      {/* IMAGE */}
+                      <div className="h-56 overflow-hidden relative bg-slate-200">
                         <img
                           src={item.urlToImage}
                           alt={item.title}
-                          className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700"
                           onError={(e) => { e.target.src = 'https://via.placeholder.com/400x200?text=News' }}
                         />
-                        <div className="absolute top-0 right-0 bg-blue-600 text-white text-xs font-bold px-3 py-1 rounded-bl-lg">
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/30 to-transparent group-hover:from-black/50 transition-all"></div>
+                        <div className="absolute top-4 right-4 badge badge-blue">
                           {item.source || 'News'}
                         </div>
                       </div>
 
+                      {/* CONTENT */}
                       <div className="p-6 flex flex-col flex-grow">
-                        <h3 className="font-bold text-xl text-gray-900 mb-3 leading-snug group-hover:text-blue-700 transition-colors">
+                        <h3 className="font-bold text-lg text-slate-900 mb-3 leading-snug group-hover:text-blue-600 transition-colors line-clamp-2">
                           {item.title}
                         </h3>
-                        <div
-                          className="text-gray-600 text-sm line-clamp-3 mb-4 flex-grow prose prose-sm"
-                          dangerouslySetInnerHTML={{ __html: item.summary || item.description }}
-                        />
-                        <button className="mt-auto w-full bg-gray-50 text-blue-700 font-bold py-3 rounded-lg hover:bg-blue-600 hover:text-white transition shadow-sm border border-gray-100">
-                          Đọc ngay &rarr;
+                        <p className="text-slate-600 text-sm line-clamp-3 mb-4 flex-grow">
+                          {item.summary || item.description || 'Không có mô tả'}
+                        </p>
+                        <button className="btn btn-primary w-full group-hover:shadow-lg">
+                          Đọc ngay →
                         </button>
                       </div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* EMPTY STATE */}
+              {!loading && news.length === 0 && !error && (
+                <div className="text-center py-24">
+                  <p className="text-xl text-slate-500">📭 Không tìm thấy bài báo</p>
                 </div>
               )}
             </main>
